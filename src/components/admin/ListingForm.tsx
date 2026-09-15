@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { adminJson, uploadImage } from "@/lib/admin/adminFetch";
+import { moveItem } from "@/lib/admin/galleryOrder";
 import { imageUrl } from "@/lib/sanity/image";
 import { fromCanonicalSqft, toCanonicalSqft } from "@/lib/sanity/lotSize";
 import { PROPERTY_TYPE_OPTIONS, type Listing, type LotSizeUnit, type SanityImageRef } from "@/lib/sanity/types";
@@ -39,6 +41,8 @@ export default function ListingForm({ listing }: ListingFormProps) {
   const [published, setPublished] = useState(field(listing, "published", false));
   const [mainImage, setMainImage] = useState<SanityImageRef | undefined>(listing?.mainImage);
   const [gallery, setGallery] = useState<SanityImageRef[]>(listing?.gallery ?? []);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const [lotSizeUnit, setLotSizeUnit] = useState<LotSizeUnit>(listing?.lotSizeDisplayUnit || "sqft");
   const [lotSizeValue, setLotSizeValue] = useState(
@@ -46,6 +50,7 @@ export default function ListingForm({ listing }: ListingFormProps) {
   );
 
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
@@ -97,14 +102,14 @@ export default function ListingForm({ listing }: ListingFormProps) {
     setGallery((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function moveGalleryImage(index: number, dir: -1 | 1) {
-    setGallery((prev) => {
-      const next = [...prev];
-      const target = index + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  function handleGalleryDrop(to: number) {
+    if (dragIndex !== null) setGallery((prev) => moveItem(prev, dragIndex, to));
+    setDragIndex(null);
+    setDragOverIndex(null);
+  }
+
+  function reverseGallery() {
+    setGallery((prev) => [...prev].reverse());
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -142,13 +147,20 @@ export default function ListingForm({ listing }: ListingFormProps) {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
+        // Stay on the editor so further edits don't mean re-finding the listing.
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
       } else {
-        await adminJson("/api/admin/listings", { method: "POST", body: JSON.stringify(payload) });
+        const res = await adminJson<{ listing: { _id: string } }>("/api/admin/listings", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        // A brand-new listing lands on its own editor page.
+        router.replace(`/admin/listings/${res.listing._id}`);
       }
-      router.push("/admin/listings");
-      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
+    } finally {
       setSaving(false);
     }
   }
@@ -287,21 +299,53 @@ export default function ListingForm({ listing }: ListingFormProps) {
       </div>
 
       <div className="mb-6">
-        <label className={labelClass}>Gallery</label>
+        <div className="flex items-center justify-between mb-1">
+          <label className={labelClass.replace(" mb-1", "")}>
+            Gallery{gallery.length > 1 && <span className="text-white/30"> · drag to reorder</span>}
+          </label>
+          {gallery.length > 1 && (
+            <button
+              type="button"
+              onClick={reverseGallery}
+              className="text-[12px] text-white/60 hover:text-[#daaf3a] border border-white/15 hover:border-[#daaf3a]/60 px-2 py-0.5"
+            >
+              Reverse order
+            </button>
+          )}
+        </div>
         <div className="flex flex-wrap gap-3 mb-2">
           {gallery.map((img, i) => (
-            <div key={img.asset._ref + i} className="relative">
+            <div
+              key={img.asset._ref + i}
+              draggable
+              data-gallery-index={i}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = "move";
+                setDragIndex(i);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault(); // required, or the browser refuses the drop
+                if (dragOverIndex !== i) setDragOverIndex(i);
+              }}
+              onDragLeave={() => setDragOverIndex((cur) => (cur === i ? null : cur))}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleGalleryDrop(i);
+              }}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setDragOverIndex(null);
+              }}
+              className={`relative cursor-grab active:cursor-grabbing select-none ${
+                dragIndex === i ? "opacity-40" : ""
+              } ${dragOverIndex === i && dragIndex !== i ? "ring-2 ring-[#daaf3a]" : ""}`}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imageUrl(img, 200) || ""} alt="" className="w-[110px] h-[80px] object-cover" />
-              <div className="flex justify-between mt-1">
-                <button type="button" onClick={() => moveGalleryImage(i, -1)} className="text-white/50 hover:text-white text-[11px]">
-                  ←
-                </button>
+              <img src={imageUrl(img, 200) || ""} alt="" draggable={false} className="w-[110px] h-[80px] object-cover pointer-events-none" />
+              <span className="absolute top-1 left-1 bg-black/60 text-white/80 text-[10px] leading-none px-1.5 py-0.5">{i + 1}</span>
+              <div className="flex justify-center mt-1">
                 <button type="button" onClick={() => removeGalleryImage(i)} className="text-red-400/70 hover:text-red-400 text-[11px]">
                   Remove
-                </button>
-                <button type="button" onClick={() => moveGalleryImage(i, 1)} className="text-white/50 hover:text-white text-[11px]">
-                  →
                 </button>
               </div>
             </div>
@@ -330,6 +374,21 @@ export default function ListingForm({ listing }: ListingFormProps) {
         >
           {saving ? "Saving..." : "Save"}
         </button>
+        {saved && <span className="text-[#daaf3a] text-[13px]">Saved ✓</span>}
+        {isEdit && (
+          <a
+            href={`/listings/${listing!.slug.current}`}
+            target="_blank"
+            rel="noreferrer"
+            className="border border-white/20 text-white/80 hover:text-[#daaf3a] hover:border-[#daaf3a]/60 text-[13px] px-4 py-2.5"
+            title={published ? "Opens the live listing in a new tab" : "Unpublished — the live page will 404 until you publish and save"}
+          >
+            View Listing ↗
+          </a>
+        )}
+        <Link href="/admin/listings" className="text-white/50 hover:text-white text-[13px] ml-auto">
+          ← All listings
+        </Link>
         {isEdit && (
           <button
             type="button"
