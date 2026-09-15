@@ -51,7 +51,14 @@ function roundTo(value: number, decimals: number): number {
 }
 
 function toListing(l: SanityListing): Listing {
-  const gallery = (l.gallery || []).map((img) => imageUrl(img, 1600) || "").filter(Boolean);
+  // The public gallery leads with the main/featured image, then the rest of the
+  // gallery in its saved order — with the main image de-duplicated so it never
+  // appears twice (some listings store it as gallery[0] as well).
+  const mainRef = l.mainImage?.asset?._ref;
+  const orderedImages = l.mainImage
+    ? [l.mainImage, ...(l.gallery || []).filter((img) => img.asset?._ref !== mainRef)]
+    : l.gallery || [];
+  const gallery = orderedImages.map((img) => imageUrl(img, 1600) || "").filter(Boolean);
   const thumbnail = imageUrl(l.mainImage, 1200) || gallery[0] || "";
   const lotAreaUnit = l.lotSizeDisplayUnit || "sqft";
   const lotArea = l.lotSizeSqft
