@@ -1,10 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminJson } from "@/lib/admin/adminFetch";
-import { imageUrl } from "@/lib/sanity/image";
 import type { Listing } from "@/lib/sanity/types";
+
+type SortKey = "address" | "status" | "price" | "createdAt" | "dateListed" | "featured" | "published";
+type SortState = { key: SortKey; dir: "asc" | "desc" } | null;
+
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "address", label: "Address" },
+  { key: "status", label: "Status" },
+  { key: "price", label: "Price" },
+  { key: "createdAt", label: "Date Added" },
+  { key: "dateListed", label: "Date Listed" },
+  { key: "featured", label: "Featured" },
+  { key: "published", label: "Published" },
+];
+
+/** Dates and price read best newest/highest first; text and flags A→Z / off→on. */
+const DESC_FIRST = new Set<SortKey>(["price", "createdAt", "dateListed"]);
+
+/** Comparable value per column; `null` means "no value" and always sorts last. */
+function sortValue(l: Listing, key: SortKey): string | number | null {
+  switch (key) {
+    case "address": return (l.address || "").toLowerCase();
+    case "status": return l.status;
+    case "price": return typeof l.price === "number" ? l.price : null;
+    case "createdAt": return l._createdAt ?? null;
+    case "dateListed": return l.dateListed || null;
+    case "featured": return l.featured ? 1 : 0;
+    case "published": return l.published ? 1 : 0;
+  }
+}
+
+function formatDate(iso?: string) {
+  return iso ? iso.slice(0, 10) : "—";
+}
 
 export default function AdminListingsPage() {
   const [listings, setListings] = useState<Listing[]>([]);
@@ -12,6 +44,32 @@ export default function AdminListingsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragId, setDragId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // null = the manual drag order (sortOrder); anything else is a view-only sort.
+  const [sort, setSort] = useState<SortState>(null);
+
+  const visibleListings = useMemo(() => {
+    if (!sort) return listings;
+    const { key, dir } = sort;
+    return [...listings].sort((a, b) => {
+      const av = sortValue(a, key);
+      const bv = sortValue(b, key);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1; // blanks last regardless of direction
+      if (bv === null) return -1;
+      const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }, [listings, sort]);
+
+  /** Click cycles a column: its natural direction → the reverse → back to manual order. */
+  function toggleSort(key: SortKey) {
+    const natural: "asc" | "desc" = DESC_FIRST.has(key) ? "desc" : "asc";
+    setSort((cur) => {
+      if (cur?.key !== key) return { key, dir: natural };
+      if (cur.dir === natural) return { key, dir: natural === "asc" ? "desc" : "asc" };
+      return null;
+    });
+  }
 
   async function load() {
     setLoading(true);
@@ -60,7 +118,7 @@ export default function AdminListingsPage() {
   }
 
   function handleDrop(targetId: string) {
-    if (!dragId || dragId === targetId) return;
+    if (sort || !dragId || dragId === targetId) return;
     const fromIndex = listings.findIndex((l) => l._id === dragId);
     const toIndex = listings.findIndex((l) => l._id === targetId);
     if (fromIndex === -1 || toIndex === -1) return;
@@ -97,6 +155,15 @@ export default function AdminListingsPage() {
 
       {error && <p className="text-red-400 text-[13px] mb-4">{error}</p>}
 
+      {sort && (
+        <p className="text-white/40 text-[12px] mb-3">
+          Sorted by {COLUMNS.find((c) => c.key === sort.key)?.label} ({sort.dir}) — a view only; drag-to-reorder is off.{" "}
+          <button type="button" onClick={() => setSort(null)} className="text-[#daaf3a] hover:underline">
+            Back to manual order
+          </button>
+        </p>
+      )}
+
       {selected.size > 0 && (
         <div className="flex items-center gap-2 mb-4 text-[13px]">
           <span className="text-white/60">{selected.size} selected</span>
@@ -123,25 +190,36 @@ export default function AdminListingsPage() {
               <tr className="text-white/40 border-b border-white/10">
                 <th className="py-2 pr-2 w-8"></th>
                 <th className="py-2 pr-3 w-12"></th>
-                <th className="py-2 pr-3">Address</th>
-                <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3">Price</th>
-                <th className="py-2 pr-3">Featured</th>
-                <th className="py-2 pr-3">Published</th>
+                {COLUMNS.map((col) => {
+                  const active = sort?.key === col.key;
+                  return (
+                    <th key={col.key} className="py-2 pr-3 font-normal">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(col.key)}
+                        className={`inline-flex items-center gap-1 hover:text-white ${active ? "text-[#daaf3a]" : ""}`}
+                        title={`Sort by ${col.label}`}
+                      >
+                        {col.label}
+                        <span className="text-[10px]">{active ? (sort!.dir === "asc" ? "▲" : "▼") : "⇅"}</span>
+                      </button>
+                    </th>
+                  );
+                })}
                 <th className="py-2 pr-3"></th>
               </tr>
             </thead>
             <tbody>
-              {listings.map((listing) => (
+              {visibleListings.map((listing) => (
                 <tr
                   key={listing._id}
-                  draggable
+                  draggable={!sort}
                   onDragStart={() => setDragId(listing._id)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => handleDrop(listing._id)}
-                  className="border-b border-white/5 text-white/80 cursor-move"
+                  className={`border-b border-white/5 text-white/80 ${sort ? "" : "cursor-move"}`}
                 >
-                  <td className="py-2 pr-2 text-white/30">⠿</td>
+                  <td className={`py-2 pr-2 ${sort ? "text-white/10" : "text-white/30"}`} title={sort ? "Return to manual order to drag" : "Drag to reorder"}>⠿</td>
                   <td className="py-2 pr-3">
                     <input
                       type="checkbox"
@@ -157,6 +235,8 @@ export default function AdminListingsPage() {
                   </td>
                   <td className="py-2 pr-3">{listing.status}</td>
                   <td className="py-2 pr-3">{listing.price ? `$${listing.price.toLocaleString()}` : "—"}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap text-white/60">{formatDate(listing._createdAt)}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap text-white/60">{formatDate(listing.dateListed)}</td>
                   <td className="py-2 pr-3">{listing.featured ? "Yes" : ""}</td>
                   <td className="py-2 pr-3">
                     <button

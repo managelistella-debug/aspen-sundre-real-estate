@@ -8,7 +8,7 @@ import { PROPERTY_TYPE_OPTIONS } from "@/lib/sanity/types";
 const LIST_PROJECTION = `{
   _id, address, city, neighborhood, slug, status, price, bedrooms, bathrooms,
   livingAreaSqft, lotSizeSqft, lotSizeDisplayUnit, propertyType, mainImage,
-  featured, sortOrder, published, dateListed, _updatedAt
+  featured, sortOrder, published, dateListed, _createdAt, _updatedAt
 }`;
 
 export async function GET(req: NextRequest) {
