@@ -160,8 +160,10 @@ export default function ListingForm({ listing }: ListingFormProps) {
     router.refresh();
   }
 
-  const inputClass =
-    "w-full bg-[rgba(17,61,53,0.4)] border border-white/15 px-3 py-2 text-white text-[14px] placeholder:text-white/30 outline-none focus:border-[#daaf3a]";
+  // Width kept separate so compound fields (lot size + unit) can size their own parts.
+  const fieldClass =
+    "bg-[rgba(17,61,53,0.4)] border border-white/15 px-3 py-2 text-white text-[14px] placeholder:text-white/30 outline-none focus:border-[#daaf3a]";
+  const inputClass = `w-full ${fieldClass}`;
   const labelClass = "block text-white/50 text-[12px] mb-1";
 
   return (
@@ -206,16 +208,16 @@ export default function ListingForm({ listing }: ListingFormProps) {
         </div>
         <div>
           <label className={labelClass}>Lot Size</label>
-          <div className="flex gap-2">
+          <div className="flex gap-2 min-w-0">
             <input
-              className={inputClass}
+              className={`flex-1 min-w-0 ${fieldClass}`}
               type="number"
               step="0.01"
               value={lotSizeValue}
               onChange={(e) => setLotSizeValue(e.target.value)}
             />
             <select
-              className={`${inputClass} w-[110px] shrink-0`}
+              className={`w-24 shrink-0 ${fieldClass}`}
               value={lotSizeUnit}
               onChange={(e) => handleUnitChange(e.target.value as LotSizeUnit)}
             >
